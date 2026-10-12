@@ -5,23 +5,107 @@ import { useNavigate } from 'react-router'
 
 const Home = () => {
 
-    const { loading, generateReport,reports } = useInterview()
+    const { loading, generateReport, reports } = useInterview()
     const [ jobDescription, setJobDescription ] = useState("")
     const [ selfDescription, setSelfDescription ] = useState("")
-    const resumeInputRef = useRef()
+    const [ selectedFile, setSelectedFile ] = useState(null)
+    const [ dragActive, setDragActive ] = useState(false)
+    const [ errorMessage, setErrorMessage ] = useState("")
+    const resumeInputRef = useRef(null)
 
     const navigate = useNavigate()
 
+    const handleFileSelected = (file) => {
+        if (!file) return
+        if (!file.name.toLowerCase().endsWith('.pdf') && file.type !== 'application/pdf') {
+            setErrorMessage("Only PDF resume files are supported.")
+            return
+        }
+        if (file.size > 10 * 1024 * 1024) {
+            setErrorMessage("PDF file size must be under 10MB.")
+            return
+        }
+        setSelectedFile(file)
+        setErrorMessage("")
+    }
+
+    const handleFileInputChange = (e) => {
+        if (e.target.files && e.target.files[0]) {
+            handleFileSelected(e.target.files[0])
+        }
+    }
+
+    const handleRemoveFile = (e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        setSelectedFile(null)
+        if (resumeInputRef.current) {
+            resumeInputRef.current.value = ""
+        }
+    }
+
+    const handleDragOver = (e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        setDragActive(true)
+    }
+
+    const handleDragLeave = (e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        setDragActive(false)
+    }
+
+    const handleDrop = (e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        setDragActive(false)
+        if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+            handleFileSelected(e.dataTransfer.files[0])
+        }
+    }
+
+    const formatFileSize = (bytes) => {
+        if (!bytes) return "0 KB"
+        const kb = bytes / 1024
+        if (kb < 1024) {
+            return `${kb.toFixed(1)} KB`
+        }
+        return `${(kb / 1024).toFixed(2)} MB`
+    }
+
     const handleGenerateReport = async () => {
-        const resumeFile = resumeInputRef.current.files[ 0 ]
-        const data = await generateReport({ jobDescription, selfDescription, resumeFile })
-        navigate(`/interview/${data._id}`)
+        setErrorMessage("")
+        if (!jobDescription.trim()) {
+            setErrorMessage("Please enter the target job description.")
+            return
+        }
+
+        if (!selectedFile && !selfDescription.trim()) {
+            setErrorMessage("Please either upload a resume PDF or write a quick self-description.")
+            return
+        }
+
+        try {
+            const data = await generateReport({
+                jobDescription,
+                selfDescription,
+                resumeFile: selectedFile
+            })
+            if (data?._id) {
+                navigate(`/interview/${data._id}`)
+            }
+        } catch (err) {
+            console.error("Report generation failed:", err)
+            setErrorMessage(err?.response?.data?.message || err?.message || "Failed to generate interview strategy. Please try again.")
+        }
     }
 
     if (loading) {
         return (
             <main className='loading-screen'>
                 <h1>Loading your interview plan...</h1>
+                <p style={{ marginTop: '0.75rem', color: '#94a3b8' }}>Our AI is analyzing your profile against the job description. This may take ~20-30 seconds.</p>
             </main>
         )
     }
@@ -37,6 +121,13 @@ const Home = () => {
 
             {/* Main Card */}
             <div className='interview-card'>
+                {errorMessage && (
+                    <div className='home-error-banner'>
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                        <span>{errorMessage}</span>
+                    </div>
+                )}
+
                 <div className='interview-card__body'>
 
                     {/* Left Panel - Job Description */}
@@ -49,12 +140,13 @@ const Home = () => {
                             <span className='badge badge--required'>Required</span>
                         </div>
                         <textarea
-                            onChange={(e) => { setJobDescription(e.target.value) }}
+                            value={jobDescription}
+                            onChange={(e) => { setJobDescription(e.target.value); if (errorMessage) setErrorMessage(""); }}
                             className='panel__textarea'
                             placeholder={`Paste the full job description here...\ne.g. 'Senior Frontend Engineer at Google requires proficiency in React, TypeScript, and large-scale system design...'`}
                             maxLength={5000}
                         />
-                        <div className='char-counter'>0 / 5000 chars</div>
+                        <div className='char-counter'>{jobDescription.length} / 5000 chars</div>
                     </div>
 
                     {/* Vertical Divider */}
@@ -75,14 +167,53 @@ const Home = () => {
                                 Upload Resume
                                 <span className='badge badge--best'>Best Results</span>
                             </label>
-                            <label className='dropzone' htmlFor='resume'>
-                                <span className='dropzone__icon'>
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="16 16 12 12 8 16" /><line x1="12" y1="12" x2="12" y2="21" /><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3" /></svg>
-                                </span>
-                                <p className='dropzone__title'>Click to upload or drag &amp; drop</p>
-                                <p className='dropzone__subtitle'>PDF or DOCX (Max 5MB)</p>
-                                <input ref={resumeInputRef} hidden type='file' id='resume' name='resume' accept='.pdf,.docx' />
-                            </label>
+
+                            <input
+                                ref={resumeInputRef}
+                                hidden
+                                type='file'
+                                id='resume'
+                                name='resume'
+                                accept='.pdf'
+                                onChange={handleFileInputChange}
+                            />
+
+                            {selectedFile ? (
+                                <div className='file-selected-box'>
+                                    <div className='file-selected-box__left'>
+                                        <span className='file-selected-box__icon'>
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+                                        </span>
+                                        <div className='file-selected-box__details'>
+                                            <span className='file-selected-box__name'>{selectedFile.name}</span>
+                                            <span className='file-selected-box__size'>{formatFileSize(selectedFile.size)} &bull; Ready to upload</span>
+                                        </div>
+                                    </div>
+                                    <button
+                                        type='button'
+                                        onClick={handleRemoveFile}
+                                        className='file-selected-box__remove'
+                                        title="Remove file"
+                                    >
+                                        ✕ Remove
+                                    </button>
+                                </div>
+                            ) : (
+                                <label
+                                    className={`dropzone ${dragActive ? 'dropzone--active' : ''}`}
+                                    htmlFor='resume'
+                                    onDragEnter={handleDragOver}
+                                    onDragOver={handleDragOver}
+                                    onDragLeave={handleDragLeave}
+                                    onDrop={handleDrop}
+                                >
+                                    <span className='dropzone__icon'>
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="16 16 12 12 8 16" /><line x1="12" y1="12" x2="12" y2="21" /><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3" /></svg>
+                                    </span>
+                                    <p className='dropzone__title'>Click to upload or drag &amp; drop</p>
+                                    <p className='dropzone__subtitle'>PDF (Max 10MB)</p>
+                                </label>
+                            )}
                         </div>
 
                         {/* OR Divider */}
@@ -92,7 +223,8 @@ const Home = () => {
                         <div className='self-description'>
                             <label className='section-label' htmlFor='selfDescription'>Quick Self-Description</label>
                             <textarea
-                                onChange={(e) => { setSelfDescription(e.target.value) }}
+                                value={selfDescription}
+                                onChange={(e) => { setSelfDescription(e.target.value); if (errorMessage) setErrorMessage(""); }}
                                 id='selfDescription'
                                 name='selfDescription'
                                 className='panel__textarea panel__textarea--short'
@@ -105,14 +237,14 @@ const Home = () => {
                             <span className='info-box__icon'>
                                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" stroke="#1a1f27" strokeWidth="2" /><line x1="12" y1="16" x2="12.01" y2="16" stroke="#1a1f27" strokeWidth="2" /></svg>
                             </span>
-                            <p>Either a <strong>Resume</strong> or a <strong>Self Description</strong> is required to generate a personalized plan.</p>
+                            <p>Either a <strong>Resume (PDF)</strong> or a <strong>Self Description</strong> is required to generate a personalized plan.</p>
                         </div>
                     </div>
                 </div>
 
                 {/* Card Footer */}
                 <div className='interview-card__footer'>
-                    <span className='footer-info'>AI-Powered Strategy Generation &bull; Approx 30s</span>
+                    <span className='footer-info'>AI-Powered Strategy Generation &bull; Approx 20-30s</span>
                     <button
                         onClick={handleGenerateReport}
                         className='generate-btn'>
@@ -123,7 +255,7 @@ const Home = () => {
             </div>
 
             {/* Recent Reports List */}
-            {reports.length > 0 && (
+            {reports && reports.length > 0 && (
                 <section className='recent-reports'>
                     <h2>My Recent Interview Plans</h2>
                     <ul className='reports-list'>
@@ -141,7 +273,6 @@ const Home = () => {
             {/* Page Footer */}
             <footer className='page-footer'>
                 <a href='#'>Privacy Policy</a>
-                <a href='#'>Terms of Service</a>
                 <a href='#'>Help Center</a>
             </footer>
         </div>
